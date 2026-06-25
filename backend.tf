@@ -15,7 +15,7 @@ terraform {
   backend "s3" {
     bucket         = "think-cricket-tfstate"
     key            = "prod/terraform.tfstate"
-    region         = "ap-south-1"
+    region         = "us-east-1"
     dynamodb_table = "think-cricket-tflock"
     encrypt        = true
   }
