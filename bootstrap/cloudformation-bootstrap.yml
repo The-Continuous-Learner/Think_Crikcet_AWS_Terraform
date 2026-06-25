@@ -1,0 +1,209 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Think Cricket — Terraform bootstrap.
+  Creates the S3 bucket (remote state), DynamoDB table (state lock), and IAM user
+  (GitHub Actions / Terraform). Deploy this once via the AWS Console before running
+  any Terraform. Delete this stack only if you are tearing down the project entirely.
+
+# ---------------------------------------------------------------------------
+# Parameters — change defaults if names are already taken in your account
+# ---------------------------------------------------------------------------
+Parameters:
+
+  StateBucketName:
+    Type: String
+    Default: think-cricket-tfstate
+    Description: >
+      S3 bucket for Terraform remote state. Must be globally unique across all AWS
+      accounts — add a suffix (e.g. think-cricket-tfstate-abc123) if the default is taken.
+
+  LockTableName:
+    Type: String
+    Default: think-cricket-tflock
+    Description: DynamoDB table for Terraform state locking.
+
+  IAMUserName:
+    Type: String
+    Default: think-cricket-terraform
+    Description: IAM user whose keys will be stored as GitHub Actions secrets.
+
+# ---------------------------------------------------------------------------
+# Resources
+# ---------------------------------------------------------------------------
+Resources:
+
+  # ---------- S3 — Terraform remote state ----------
+  TerraformStateBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain   # Keep state even if this stack is deleted
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Ref StateBucketName
+      VersioningConfiguration:
+        Status: Enabled        # Allows state file recovery if corrupted
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: expire-old-state-versions
+            Status: Enabled
+            NoncurrentVersionExpiration:
+              NoncurrentDays: 90  # Keep 90 days of state history, then purge
+
+  # ---------- DynamoDB — state lock ----------
+  TerraformLockTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Ref LockTableName
+      BillingMode: PAY_PER_REQUEST   # On-demand — zero cost when idle
+      AttributeDefinitions:
+        - AttributeName: LockID
+          AttributeType: S
+      KeySchema:
+        - AttributeName: LockID
+          KeyType: HASH
+
+  # ---------- IAM user — used by GitHub Actions ----------
+  TerraformUser:
+    Type: AWS::IAM::User
+    Properties:
+      UserName: !Ref IAMUserName
+
+  TerraformUserAccessKey:
+    Type: AWS::IAM::AccessKey
+    Properties:
+      UserName: !Ref TerraformUser
+
+  TerraformUserPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: ThinkCricketTerraformPolicy
+      Users:
+        - !Ref TerraformUser
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+
+          # EC2 + VPC — full access (Terraform manages these)
+          - Sid: EC2AndVPC
+            Effect: Allow
+            Action:
+              - ec2:*
+            Resource: '*'
+
+          # S3 — scoped to the state bucket only
+          - Sid: TerraformStateBucket
+            Effect: Allow
+            Action:
+              - s3:GetObject
+              - s3:PutObject
+              - s3:DeleteObject
+              - s3:ListBucket
+              - s3:GetBucketVersioning
+            Resource:
+              - !GetAtt TerraformStateBucket.Arn
+              - !Sub '${TerraformStateBucket.Arn}/*'
+
+          # S3 — read access to artifact bucket (pulls Spring Boot jar on EC2 boot)
+          # Scope this down once you know the artifact bucket name
+          - Sid: ArtifactBucketRead
+            Effect: Allow
+            Action:
+              - s3:GetObject
+              - s3:ListBucket
+            Resource: '*'
+
+          # DynamoDB — state locking only
+          - Sid: TerraformStateLock
+            Effect: Allow
+            Action:
+              - dynamodb:GetItem
+              - dynamodb:PutItem
+              - dynamodb:DeleteItem
+            Resource: !GetAtt TerraformLockTable.Arn
+
+          # Secrets Manager — store/read DB connection string and app secrets
+          - Sid: SecretsManager
+            Effect: Allow
+            Action:
+              - secretsmanager:CreateSecret
+              - secretsmanager:UpdateSecret
+              - secretsmanager:DeleteSecret
+              - secretsmanager:DescribeSecret
+              - secretsmanager:GetSecretValue
+              - secretsmanager:TagResource
+            Resource: '*'
+
+          # SSM Parameter Store — alternative to Secrets Manager
+          - Sid: SSMParameterStore
+            Effect: Allow
+            Action:
+              - ssm:GetParameter
+              - ssm:GetParameters
+              - ssm:PutParameter
+              - ssm:DeleteParameter
+              - ssm:DescribeParameters
+              - ssm:AddTagsToResource
+            Resource: '*'
+
+          # IAM — Terraform needs to create an instance profile so the EC2
+          # instance can pull from S3 and read secrets at startup
+          - Sid: IAMInstanceProfile
+            Effect: Allow
+            Action:
+              - iam:CreateRole
+              - iam:DeleteRole
+              - iam:GetRole
+              - iam:TagRole
+              - iam:UntagRole
+              - iam:AttachRolePolicy
+              - iam:DetachRolePolicy
+              - iam:ListRolePolicies
+              - iam:ListAttachedRolePolicies
+              - iam:CreateInstanceProfile
+              - iam:DeleteInstanceProfile
+              - iam:GetInstanceProfile
+              - iam:AddRoleToInstanceProfile
+              - iam:RemoveRoleFromInstanceProfile
+              - iam:ListInstanceProfilesForRole
+              - iam:PassRole
+              - iam:CreatePolicy
+              - iam:DeletePolicy
+              - iam:GetPolicy
+              - iam:GetPolicyVersion
+              - iam:ListPolicyVersions
+              - iam:CreatePolicyVersion
+              - iam:DeletePolicyVersion
+            Resource: '*'
+
+# ---------------------------------------------------------------------------
+# Outputs — copy these to GitHub Actions secrets after stack creation
+# ---------------------------------------------------------------------------
+Outputs:
+
+  AccessKeyId:
+    Description: "GitHub Actions secret → AWS_ACCESS_KEY_ID"
+    Value: !Ref TerraformUserAccessKey
+
+  SecretAccessKey:
+    Description: "GitHub Actions secret → AWS_SECRET_ACCESS_KEY  (only visible here — copy it now)"
+    Value: !GetAtt TerraformUserAccessKey.SecretAccessKey
+
+  StateBucketName:
+    Description: "Terraform backend config → bucket"
+    Value: !Ref TerraformStateBucket
+
+  LockTableName:
+    Description: "Terraform backend config → dynamodb_table"
+    Value: !Ref TerraformLockTable
+
+  IAMUserArn:
+    Description: "ARN of the Terraform IAM user"
+    Value: !GetAtt TerraformUser.Arn

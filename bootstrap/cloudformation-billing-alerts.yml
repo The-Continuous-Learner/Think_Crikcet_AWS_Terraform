@@ -1,0 +1,126 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Think Cricket — AWS billing alerts at $2, $5, and $10.
+  IMPORTANT: Deploy this stack in us-east-1 (N. Virginia) only.
+  AWS billing metrics are only published to us-east-1 regardless of your main region.
+
+# ---------------------------------------------------------------------------
+# Prerequisites (one-time account setting — do this before deploying)
+#
+#   AWS Console → Billing & Cost Management → Billing Preferences
+#   → Check "Receive Billing Alerts" → Save
+#
+# Without this, the alarms are created but never trigger.
+# ---------------------------------------------------------------------------
+
+Parameters:
+
+  AlertEmail:
+    Type: String
+    Description: >
+      Email address to receive billing alerts. AWS will send a confirmation
+      email — you must click the link before alerts will be delivered.
+    AllowedPattern: '^[^\s@]+@[^\s@]+\.[^\s@]+$'
+    ConstraintDescription: Must be a valid email address.
+
+# ---------------------------------------------------------------------------
+# Resources
+# ---------------------------------------------------------------------------
+Resources:
+
+  # ---------- SNS topic — single topic for all three alarms ----------
+  BillingAlertTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: think-cricket-billing-alerts
+      DisplayName: Think Cricket Billing Alert
+
+  BillingAlertEmailSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      TopicArn: !Ref BillingAlertTopic
+      Protocol: email
+      Endpoint: !Ref AlertEmail
+
+  # ---------- $2 alarm ----------
+  BillingAlarm2:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: ThinkCricket-Billing-2USD
+      AlarmDescription: AWS estimated charges have exceeded $2.00
+      Namespace: AWS/Billing
+      MetricName: EstimatedCharges
+      Dimensions:
+        - Name: Currency
+          Value: USD
+      Statistic: Maximum
+      Period: 86400       # Billing metrics update once per day
+      EvaluationPeriods: 1
+      Threshold: 2
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref BillingAlertTopic
+      OKActions:
+        - !Ref BillingAlertTopic
+
+  # ---------- $5 alarm ----------
+  BillingAlarm5:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: ThinkCricket-Billing-5USD
+      AlarmDescription: AWS estimated charges have exceeded $5.00
+      Namespace: AWS/Billing
+      MetricName: EstimatedCharges
+      Dimensions:
+        - Name: Currency
+          Value: USD
+      Statistic: Maximum
+      Period: 86400
+      EvaluationPeriods: 1
+      Threshold: 5
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref BillingAlertTopic
+      OKActions:
+        - !Ref BillingAlertTopic
+
+  # ---------- $10 alarm ----------
+  BillingAlarm10:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: ThinkCricket-Billing-10USD
+      AlarmDescription: AWS estimated charges have exceeded $10.00
+      Namespace: AWS/Billing
+      MetricName: EstimatedCharges
+      Dimensions:
+        - Name: Currency
+          Value: USD
+      Statistic: Maximum
+      Period: 86400
+      EvaluationPeriods: 1
+      Threshold: 10
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref BillingAlertTopic
+      OKActions:
+        - !Ref BillingAlertTopic
+
+# ---------------------------------------------------------------------------
+# Outputs
+# ---------------------------------------------------------------------------
+Outputs:
+
+  SNSTopicArn:
+    Description: ARN of the billing alert SNS topic
+    Value: !Ref BillingAlertTopic
+
+  AlertEmail:
+    Description: Confirmation email sent to this address — check inbox and confirm
+    Value: !Ref AlertEmail
+
+  Note:
+    Description: Next step
+    Value: "Check your inbox and click the AWS confirmation link, otherwise alerts will not be delivered."
