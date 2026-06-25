@@ -133,3 +133,14 @@ resource "aws_instance" "app" {
 
   tags = { Name = "${var.project_name}-app" }
 }
+
+# ── Elastic IP ─────────────────────────────────────────────────────────────────
+# Fixed public IP that survives terraform destroy + apply cycles.
+# Only billed (~$0.005/hr) when the instance is stopped — free while running.
+
+resource "aws_eip" "app" {
+  instance = aws_instance.app.id
+  domain   = "vpc"
+
+  tags = { Name = "${var.project_name}-eip" }
+}
