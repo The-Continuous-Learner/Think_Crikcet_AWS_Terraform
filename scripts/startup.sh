@@ -1,6 +1,6 @@
 #!/bin/bash
 # EC2 user_data startup script for Think Cricket.
-# Rendered by Terraform templatefile() — ${var} tokens are substituted at apply time.
+# Rendered by Terraform templatefile() — $${var} tokens are substituted at apply time.
 # All output is written to /var/log/startup.log for debugging via SSM Session Manager.
 set -euo pipefail
 exec > >(tee /var/log/startup.log) 2>&1
