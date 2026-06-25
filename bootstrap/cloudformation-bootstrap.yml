@@ -113,10 +113,11 @@ Resources:
 
           # S3 — read access to artifact bucket (pulls Spring Boot jar on EC2 boot)
           # Scope this down once you know the artifact bucket name
-          - Sid: ArtifactBucketRead
+          - Sid: ArtifactBucket
             Effect: Allow
             Action:
               - s3:GetObject
+              - s3:PutObject
               - s3:ListBucket
             Resource: '*'
 
